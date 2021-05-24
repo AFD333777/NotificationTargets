@@ -2,35 +2,24 @@ from PyQt5.QtWidgets import QDialog, QLabel, QPushButton
 from PyQt5.QtWidgets import QFileDialog
 from PyQt5 import QtGui
 import sqlite3
-import shutil
-import os
 from WindowAdd import Ui_WindowAdd
+from Database import Database
 
 
 class RecordAdd(QDialog, Ui_WindowAdd):
     def __init__(self, parent):
         super().__init__()
         self.setupUi(self)
+        self.setFixedSize(1200, 800)
+        self.db = Database()
+        self.connection = sqlite3.connect("Notifications.db")
+        self.cursor = self.connection.cursor()
+        self.updateDate()
         self.BtnAdd.clicked.connect(self.checkConditions)
         self.PhotoAdd.clicked.connect(self.selectPhoto)
         self.calendar.selectionChanged.connect(self.updateDate)
         self.Name.textChanged.connect(self.changeColor)
         self.Period.currentIndexChanged.connect(self.changeColor)
-        self.BtnAdd.setStyleSheet("background-color: green;")
-
-    def formQuery(self, title, finishdate, rank, comment, photo=""):
-        if photo == "":
-            return f"""
-            INSERT INTO Targets (Title, FinishDate, Rank, Comment)
-            VALUES ('{title}', '{finishdate}','{rank}','{comment}')    ;    
-            """
-        else:
-            currentPath = os.getcwd() + "/photos"
-            newPath = shutil.copy(photo, currentPath)
-            return f"""
-                        INSERT INTO Targets (Title, FinishDate, Rank, Comment, Photo)
-                        VALUES ('{title}', '{finishdate}','{rank}','{comment}', '{newPath}');    
-                        """
 
     def getConfirm(self):
         self.dialogConfirm = QDialog()
@@ -53,30 +42,6 @@ class RecordAdd(QDialog, Ui_WindowAdd):
     def closeDialogConfirm(self):
         self.dialogConfirm.close()
 
-    def queryAdd(self):
-        CondFP = True
-        title = self.Name.text()
-        finishDate = self.calendar.selectedDate().toString()
-        rank = self.Period.currentText()
-        comment = self.Comment.text()
-        try:
-            FilePath = self.FilePath
-        except Exception:
-            CondFP = False
-        Connection = sqlite3.connect("Notifications.db")
-        Cursor = Connection.cursor()
-        if CondFP:
-            Cursor.execute(self.formQuery(title, finishDate, rank, comment, self.FilePath))
-
-        else:
-            Cursor.execute(self.formQuery(title, finishDate, rank, comment))
-        Connection.commit()
-        self.getConfirm()
-        self.dialogConfirm.show()
-        self.setDisabled(True)
-        self.dialogConfirm.exec_()
-        self.close()
-
     def selectPhoto(self):
         self.FilePath = QFileDialog.getOpenFileName(
             self, 'Выбрать картинку', '',
@@ -85,6 +50,7 @@ class RecordAdd(QDialog, Ui_WindowAdd):
 
     def checkConditions(self):
         cond = True
+        FilePath = ""
         if self.Name.text() == "":
             cond = False
             self.Name.setStyleSheet("background-color: red;")
@@ -92,7 +58,17 @@ class RecordAdd(QDialog, Ui_WindowAdd):
             cond = False
             self.Period.setStyleSheet("background-color: red;")
         if cond:
-            self.queryAdd()
+            try:
+                FilePath = self.FilePath
+            except Exception:
+                pass
+            self.db.queryAdd(self.Name.text(), self.calendar.selectedDate().toString(),
+                             self.Period.currentText(), self.Comment.text(), FilePath)
+            self.getConfirm()
+            self.dialogConfirm.show()
+            self.setDisabled(True)
+            self.dialogConfirm.exec_()
+            self.close()
 
     def updateDate(self):
         self.labelDate.setText("Дата окончания: " + self.calendar.selectedDate().toString())

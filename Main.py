@@ -1,21 +1,27 @@
 import sys
 import os
-from PyQt5.QtWidgets import QApplication, QMainWindow, QDialog, QLabel, QPushButton
+from PyQt5.QtWidgets import QApplication, QMainWindow, QDialog, QLabel, \
+    QPushButton, QSystemTrayIcon, QStyle, QAction, QMenu
 from PyQt5.QtGui import QPixmap
 from PyQt5 import QtGui
 from WindowBasic import Ui_MainWindow
 from Database import Database
 from RecordAdd import RecordAdd
 import sqlite3
+import threading
+import datetime as dt
+import platform
+import win10toast
 
 
 class Main(QMainWindow, Ui_MainWindow):
     def __init__(self):
         super().__init__()
         self.setupUi(self)
-        Database()
+        self.db = Database()
         self.connection = sqlite3.connect("Notifications.db")
         self.cursor = self.connection.cursor()
+        self.setFixedSize(1200, 800)
         self.btn_add.clicked.connect(self.recordAdd)
         self.btn_delete.clicked.connect(self.recordDelete)
         self.viewDay()
@@ -24,6 +30,58 @@ class Main(QMainWindow, Ui_MainWindow):
         self.Targets.currentIndexChanged.connect(self.viewRecord)
         self.btnOpenPhoto.clicked.connect(self.openPhoto)
         self.createFolderPhotos()
+        self.condTray = False
+        self.condQuit = False
+        first = threading.Thread(target=self.checkTime)
+        first.start()
+
+    def getNotification(self, title, message):
+        plt = platform.system()
+        if plt == "Darwin":
+            command = '''
+            osascript -e 'display notification "{message}" with title "{title}"'
+            '''
+        elif plt == "Linux":
+            command = f'''
+            notify-send "{title}" "{message}"
+            '''
+        elif plt == "Windows":
+            win10toast.ToastNotifier().show_toast(title, message)
+            return
+        else:
+            return
+        os.system(command)
+
+    def checkTime(self):
+        while True:
+            if self.getCondQuit():
+                sys.exit()
+            if dt.datetime.now().strftime("%M:%S") == "00:00":
+                self.getNotification("Notification Targets", "Зайдите в приложение")
+
+    def changeCondQuit(self):
+        self.condQuit = True
+
+    def getCondQuit(self):
+        return self.condQuit
+
+    def getOverlay(self):
+        if not self.condTray:
+            self.condTray = True
+            self.overlay = QSystemTrayIcon(self.style().standardIcon(QStyle.SP_ComputerIcon), self)
+            showApp = QAction("Открыть", self)
+            hideApp = QAction("Скрыть", self)
+            quitApp = QAction("Закрыть", self)
+            showApp.triggered.connect(self.show)
+            hideApp.triggered.connect(self.hide)
+            quitApp.triggered.connect(QApplication.quit)
+            quitApp.triggered.connect(self.changeCondQuit)
+            trayMenu = QMenu()
+            trayMenu.addAction(showApp)
+            trayMenu.addAction(hideApp)
+            trayMenu.addAction(quitApp)
+            self.overlay.setContextMenu(trayMenu)
+            self.overlay.show()
 
     def recordAdd(self):
         self.WindowAdd = RecordAdd(self)
@@ -36,12 +94,7 @@ class Main(QMainWindow, Ui_MainWindow):
 
     def recordDelete(self):
         try:
-            self.cursor.execute(f"""
-            DELETE FROM Targets 
-            WHERE 
-            id = {self.record[0]};        
-            """)
-            self.connection.commit()
+            self.db.queryDel(self.record[0])
             self.viewDay()
             self.viewRecord()
             self.getConfirm()
@@ -59,7 +112,7 @@ class Main(QMainWindow, Ui_MainWindow):
         try:
             name = self.record[-1]
             os.startfile(name)
-        except Exception:
+        except TypeError:
             self.labelError.setText("Фото отсутсвует")
             self.labelError.resize(self.labelError.sizeHint())
             self.labelError.setStyleSheet("background-color:red;")
@@ -71,7 +124,7 @@ class Main(QMainWindow, Ui_MainWindow):
         date = self.calendar.selectedDate().toString()
         data = self.cursor.execute(f"""SELECT * FROM Targets WHERE FinishDate='{date}' ORDER BY Title ASC""").fetchall()
         if len(data) != 0:
-            titles = [self.Targets.addItem(elem[1]) for elem in data]
+            [self.Targets.addItem(elem[1]) for elem in data]
         else:
             self.Targets.addItem("Данные отсутствуют!")
 
@@ -138,11 +191,16 @@ class Main(QMainWindow, Ui_MainWindow):
             os.mkdir(path)
 
     def closeEvent(self, event):
-        self.connection.close()
+        event.ignore()
+        self.hide()
+        self.getOverlay()
+        self.overlay.showMessage("Notification Targets",
+                                 "Приложение помещено в оверлей",
+                                 QSystemTrayIcon.Information, 10)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     app = QApplication(sys.argv)
     MainApp = Main()
     MainApp.show()
-    sys.exit(app.exec_())
+    app.exec_()
